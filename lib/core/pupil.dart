@@ -1,7 +1,6 @@
 import 'package:csv/csv.dart';
 //import 'package:file_picker/file_picker.dart';
 import 'dart:io';
-import 'dart:convert';
 
 // import 'package:flutter/widgets.dart';
 
@@ -22,7 +21,7 @@ class Pupil {
   @override
   int get hashCode => name.hashCode;
 
-  int getScore() {
+  int get score {
     int score = 0;
     for (var s in should) {
       score += s.group == group ? 1 : 0;
@@ -32,27 +31,37 @@ class Pupil {
     }
     return score;
   }
+
+  bool get isAlone {
+    return should.isEmpty ? false : !should.any((p) => p.group == group);
+  }
+
+  int get nMatches =>
+      should.fold(0, (acum, p) => p.group == group ? acum + 1 : acum);
+
+  int get nMismatches =>
+      shouldNot.fold(0, (acum, p) => p.group == group ? acum + 1 : acum);
 }
 
 class Group {
-  int name;
-  int score = 0;
+  String name;
+  List<Pupil> pupils = [];
   Group(this.name);
 
-  addScore(int point) => score += point;
-  resetScore() => score = 0;
-}
+  void reset() => pupils.clear();
 
-/// Checks if [Pupil] already exists otherwise adds it to the list and returns it
-Pupil getOrInsertPupil(String name, List<Pupil> pupils) {
-  Pupil pupil = Pupil(name);
-  int idx = pupils.indexOf(pupil);
-  if (idx == -1) {
-    pupils.add(pupil);
-  } else {
-    pupil = pupils[idx];
-  }
-  return pupil;
+  int get nAlone =>
+      pupils.map((p) => p.isAlone ? 1 : 0).reduce((x, y) => x + y);
+  int get nMatches => pupils.map((p) => p.nMatches).reduce((x, y) => x + y);
+  int get nMismatches =>
+      pupils.map((p) => p.nMismatches).reduce((x, y) => x + y);
+  int get score => pupils.map((p) => p.score).reduce((x, y) => x + y);
+
+  @override
+  bool operator ==(Object other) => other is Group && other.name == name;
+
+  @override
+  int get hashCode => name.hashCode;
 }
 
 List<int> range(int start, [int? stop]) {
@@ -61,6 +70,81 @@ List<int> range(int start, [int? stop]) {
     start = 0;
   }
   return [for (var i = start; i < stop; i++) i];
+}
+
+int computeTotalScore(List<Pupil> pupils) {
+  return pupils.fold(0, (acum, p) => acum + p.score);
+}
+
+void assignGrouping(
+    List<int> grouping, List<Pupil> pupils, List<Group> groups) {
+  for (var g in groups) {
+    g.reset();
+  }
+  int i = 0;
+  for (var p in pupils) {
+    p.group = groups[grouping[i]];
+    groups[grouping[i]].pupils.add(p);
+    i++;
+  }
+}
+
+List<int> randomGrouping(List<Pupil> pupils, List<Group> groups) {
+  var gping = [for (int i in range(pupils.length)) i % groups.length];
+  gping.shuffle();
+  assignGrouping(gping, pupils, groups);
+  return gping;
+}
+
+int bestOf(int nTries, List<Pupil> pupils, List<Group> groups) {
+  var bestScore = -1000;
+  List<int> bestGping = <int>[];
+
+  for (var _ in range(nTries)) {
+    var gping = randomGrouping(pupils, groups);
+    var score = computeTotalScore(pupils);
+    if (score > bestScore) {
+      bestScore = score;
+      bestGping = gping;
+    }
+  }
+
+  assignGrouping(bestGping, pupils, groups);
+  return bestScore;
+}
+
+void printSummary(List<Group> groups) {
+  print('');
+  for (var g in groups) {
+    print('Group ${g.name}');
+    print('   matches: ${g.nMatches}');
+    print('mismatches: ${g.nMismatches}');
+    print('     alone: ${g.nAlone}');
+    print('     score: ${g.score}');
+    print('\n===============\n');
+  }
+}
+
+printLong(List<Pupil> pupils, List<Group> groups) {
+  int i = 0;
+  for (Pupil p in pupils) {
+    print(p.name);
+    print(p.group?.name);
+    print(p.score);
+    print('-----------------SHOULD------------------');
+    for (var s in p.should) {
+      print(s.name);
+    }
+    print('---------------SHOULD NOT----------------');
+    for (var s in p.shouldNot) {
+      print(s.name);
+    }
+    print('=========================================');
+  }
+  for (var g in groups) {
+    print('Group ${g.name} ${g.score}');
+  }
+  print("\n");
 }
 
 // Test main
@@ -86,33 +170,19 @@ main() {
         .sublist(5)
         .where((name) => name != '')
         .forEach((name) => pupil.shouldNot.add(pupils[name]!));
+    // row
+    //     .sublist(8, 11)
+    //     .where((name) => name != '')
+    //     .forEach((name) => pupil.must.add(pupils[name]!));
+    // row
+    //     .sublist(11)
+    //     .where((name) => name != '')
+    //     .forEach((name) => pupil.mustNot.add(pupils[name]!));
   }
 
-  print(pupils.length);
   var groups = [Group("3r A"), Group("3r B"), Group("3r C")];
-  var ass = [for (int i in range(pupils.length)) i % groups.length];
-  ass.shuffle();
 
-  int i = 0;
-  for (Pupil p in pupils.values) {
-    p.group = groups[ass[i++]];
-
-    p.group?.addScore(p.getScore());
-    print(p.name);
-    print(p.group?.name);
-    print(p.getScore());
-    print('-----------------SHOULD------------------');
-    for (var s in p.should) {
-      print(s.name);
-    }
-    print('---------------SHOULD NOT----------------');
-    for (var s in p.shouldNot) {
-      print(s.name);
-    }
-    print('=========================================');
-  }
-  print("\n");
-  for (var g in groups) {
-    print('Group ${g.name} ${g.score}');
-  }
+  var bestScore = bestOf(1000000, pupils.values.toList(), groups);
+  printSummary(groups);
+  print('Total score: $bestScore');
 }
